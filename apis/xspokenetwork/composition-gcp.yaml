@@ -1,0 +1,161 @@
+# GCP Spoke Network Composition
+#
+# Provisions:
+#   Spoke VPC Network (custom mode)
+#   Spoke Subnetwork
+#   NetworkPeering spoke→hub
+#   NetworkPeering hub→spoke
+#
+# ⚠ GCP VPC Peering is non-transitive: spoke-to-spoke traffic is
+#   NOT forwarded through the hub. Upgrade to Network Connectivity
+#   Center (NCC) for transitive routing at scale.
+
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xspokenetwork-gcp
+  labels:
+    provider: gcp
+    topology: hub-and-spoke
+spec:
+  compositeTypeRef:
+    apiVersion: network.platform.io/v1alpha1
+    kind: XSpokeNetwork
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: crossplane-contrib-function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # ── Spoke VPC Network ─────────────────────────────────────────────────
+          - name: spoke-network
+            base:
+              apiVersion: compute.gcp.upbound.io/v1beta1
+              kind: Network
+              spec:
+                forProvider:
+                  autoCreateSubnetworks: false
+                  routingMode: REGIONAL
+                  description: "Spoke VPC network — hub-and-spoke topology"
+                providerConfigRef:
+                  name: gcp-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-network"
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.selfLink
+                toFieldPath: status.spokeNetworkId
+                policy:
+                  fromFieldPath: Optional
+
+          # ── Spoke Subnetwork ──────────────────────────────────────────────────
+          - name: spoke-subnetwork
+            base:
+              apiVersion: compute.gcp.upbound.io/v1beta1
+              kind: Subnetwork
+              spec:
+                forProvider:
+                  privateIpGoogleAccess: true
+                providerConfigRef:
+                  name: gcp-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnetwork"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.cidrBlock
+                toFieldPath: spec.forProvider.ipCidrRange
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.projectId
+                toFieldPath: spec.forProvider.project
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.networkRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-network"
+
+          # ── Peering: Spoke → Hub ──────────────────────────────────────────────
+          - name: peering-spoke-to-hub
+            base:
+              apiVersion: compute.gcp.upbound.io/v1beta1
+              kind: NetworkPeering
+              spec:
+                forProvider:
+                  exportCustomRoutes: true
+                  importCustomRoutes: true
+                providerConfigRef:
+                  name: gcp-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-spoke-to-hub"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.networkRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-network"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.hubNetworkSelfLink
+                toFieldPath: spec.forProvider.peerNetwork
+
+          # ── Peering: Hub → Spoke ──────────────────────────────────────────────
+          # The service account must have compute.networks.addPeering on the hub network.
+          - name: peering-hub-to-spoke
+            base:
+              apiVersion: compute.gcp.upbound.io/v1beta1
+              kind: NetworkPeering
+              spec:
+                forProvider:
+                  exportCustomRoutes: true
+                  importCustomRoutes: true
+                providerConfigRef:
+                  name: gcp-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-hub-to-spoke"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.hubNetworkId
+                toFieldPath: spec.forProvider.network
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.peerNetworkRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-network"

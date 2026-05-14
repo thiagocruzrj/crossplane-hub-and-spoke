@@ -1,0 +1,23 @@
+# Apply:  kubectl apply -f examples/azure/hub.yaml
+# Watch:  kubectl get xhubnetwork azure-hub -w
+
+apiVersion: network.platform.io/v1alpha1
+kind: XHubNetwork
+metadata:
+  name: azure-hub
+spec:
+  compositionSelector:
+    matchLabels:
+      provider: azure
+      topology: hub-and-spoke
+  parameters:
+    region: eastus
+    cidrBlock: 10.100.0.0/16
+
+    # GatewaySubnet (Azure requires this exact name for VPN/ExpressRoute gateways)
+    publicSubnetCidrA: 10.100.0.0/27
+
+    # Private workload subnet
+    privateSubnetCidrA: 10.100.10.0/24
+
+    resourceGroupName: rg-hub-network

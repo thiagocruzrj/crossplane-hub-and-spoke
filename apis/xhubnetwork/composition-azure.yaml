@@ -1,0 +1,155 @@
+# Azure Hub Network Composition
+#
+# Provisions:
+#   VirtualNetwork (hub VNet) with address space
+#   GatewaySubnet  — reserved for VPN / ExpressRoute gateway
+#   PublicSubnet   — workloads that need public routing
+#   PrivateSubnet  — internal workloads / AKS nodes
+#
+# Spoke VNets connect to this hub via VirtualNetworkPeering (see
+# apis/xspokenetwork/composition-azure.yaml).
+
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xhubnetwork-azure
+  labels:
+    provider: azure
+    topology: hub-and-spoke
+spec:
+  compositeTypeRef:
+    apiVersion: network.platform.io/v1alpha1
+    kind: XHubNetwork
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: crossplane-contrib-function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # ── Resource Group ────────────────────────────────────────────────────
+          - name: resource-group
+            base:
+              apiVersion: azure.upbound.io/v1beta1
+              kind: ResourceGroup
+              spec:
+                forProvider:
+                  tags:
+                    Role: hub
+                    Topology: hub-and-spoke
+                providerConfigRef:
+                  name: azure-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.resourceGroupName
+                toFieldPath: metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+
+          # ── Hub Virtual Network ───────────────────────────────────────────────
+          - name: hub-vnet
+            base:
+              apiVersion: network.azure.upbound.io/v1beta2
+              kind: VirtualNetwork
+              spec:
+                forProvider:
+                  tags:
+                    Role: hub
+                    Topology: hub-and-spoke
+                providerConfigRef:
+                  name: azure-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vnet"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.resourceGroupName
+                toFieldPath: spec.forProvider.resourceGroupName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.cidrBlock
+                toFieldPath: spec.forProvider.addressSpace[0]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.hubNetworkId
+                policy:
+                  fromFieldPath: Optional
+
+          # ── GatewaySubnet (reserved name required by Azure) ───────────────────
+          - name: gateway-subnet
+            base:
+              apiVersion: network.azure.upbound.io/v1beta2
+              kind: Subnet
+              metadata:
+                name: GatewaySubnet
+              spec:
+                forProvider:
+                  name: GatewaySubnet
+                providerConfigRef:
+                  name: azure-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.resourceGroupName
+                toFieldPath: spec.forProvider.resourceGroupName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.publicSubnetCidrA
+                toFieldPath: spec.forProvider.addressPrefixes[0]
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.virtualNetworkNameRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vnet"
+
+          # ── Private Subnet ────────────────────────────────────────────────────
+          - name: private-subnet
+            base:
+              apiVersion: network.azure.upbound.io/v1beta2
+              kind: Subnet
+              spec:
+                forProvider:
+                  name: private
+                providerConfigRef:
+                  name: azure-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-subnet"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.resourceGroupName
+                toFieldPath: spec.forProvider.resourceGroupName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.privateSubnetCidrA
+                toFieldPath: spec.forProvider.addressPrefixes[0]
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.virtualNetworkNameRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vnet"

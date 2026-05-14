@@ -1,0 +1,55 @@
+# Apply after Crossplane is running:
+#   kubectl apply -f cluster/install/providers.yaml
+# Wait for all providers to become healthy before proceeding.
+
+---
+# ── AWS ──────────────────────────────────────────────────────────────────────
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-family-aws
+spec:
+  package: xpkg.upbound.io/upbound/provider-family-aws:v1.14.0
+  revisionActivationPolicy: Automatic
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-aws-ec2
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-ec2:v1.14.0
+  revisionActivationPolicy: Automatic
+---
+# ── Azure ─────────────────────────────────────────────────────────────────────
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-family-azure
+spec:
+  package: xpkg.upbound.io/upbound/provider-family-azure:v1.9.0
+  revisionActivationPolicy: Automatic
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-azure-network
+spec:
+  package: xpkg.upbound.io/upbound/provider-azure-network:v1.9.0
+  revisionActivationPolicy: Automatic
+---
+# ── GCP ───────────────────────────────────────────────────────────────────────
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-family-gcp
+spec:
+  package: xpkg.upbound.io/upbound/provider-family-gcp:v1.8.0
+  revisionActivationPolicy: Automatic
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-gcp-compute
+spec:
+  package: xpkg.upbound.io/upbound/provider-gcp-compute:v1.8.0
+  revisionActivationPolicy: Automatic

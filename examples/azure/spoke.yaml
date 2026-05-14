@@ -1,0 +1,26 @@
+# Prerequisites:
+#   kubectl get xhubnetwork azure-hub -o jsonpath='{.status.hubNetworkId}'
+#
+# Apply:  kubectl apply -f examples/azure/spoke.yaml
+
+apiVersion: network.platform.io/v1alpha1
+kind: XSpokeNetwork
+metadata:
+  name: azure-spoke-workloads
+spec:
+  compositionSelector:
+    matchLabels:
+      provider: azure
+      topology: hub-and-spoke
+  parameters:
+    region: eastus
+    cidrBlock: 10.101.0.0/16
+
+    subnetCidrA: 10.101.0.0/24
+
+    # From: kubectl get xhubnetwork azure-hub -o jsonpath='{.status.hubNetworkId}'
+    hubNetworkId: /subscriptions/<SUB_ID>/resourceGroups/rg-hub-network/providers/Microsoft.Network/virtualNetworks/azure-hub-vnet
+
+    resourceGroupName: rg-spoke-workloads
+    hubResourceGroupName: rg-hub-network
+    hubVnetName: azure-hub-vnet

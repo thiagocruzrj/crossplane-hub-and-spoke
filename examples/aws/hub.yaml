@@ -1,0 +1,31 @@
+# Apply:  kubectl apply -f examples/aws/hub.yaml
+# Watch:  kubectl get xhubnetwork aws-hub -w
+# Status: kubectl describe xhubnetwork aws-hub
+
+apiVersion: network.platform.io/v1alpha1
+kind: XHubNetwork
+metadata:
+  name: aws-hub
+spec:
+  compositionSelector:
+    matchLabels:
+      provider: aws
+      topology: hub-and-spoke
+  parameters:
+    region: us-east-1
+    cidrBlock: 10.0.0.0/16
+
+    # Availability zones
+    availabilityZoneA: us-east-1a
+    availabilityZoneB: us-east-1b
+
+    # Public subnets (Internet-facing — NAT Gateway, load balancers)
+    publicSubnetCidrA: 10.0.0.0/24
+    publicSubnetCidrB: 10.0.1.0/24
+
+    # Private subnets (workloads, EKS nodes)
+    privateSubnetCidrA: 10.0.10.0/24
+    privateSubnetCidrB: 10.0.11.0/24
+
+    # BGP ASN for the Transit Gateway
+    transitGatewayAsn: 64512

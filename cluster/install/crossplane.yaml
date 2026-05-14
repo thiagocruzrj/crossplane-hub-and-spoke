@@ -1,0 +1,28 @@
+# Crossplane Helm installation values
+#
+# Bootstrap:
+#   kubectl create namespace crossplane-system
+#   helm repo add crossplane-stable https://charts.crossplane.io/stable
+#   helm install crossplane crossplane-stable/crossplane \
+#     --namespace crossplane-system \
+#     --values cluster/install/crossplane.yaml
+
+replicas: 1
+
+resourcesCrossplane:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+resourcesRBACManager:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# No extra args needed — composition functions are enabled by default in v2

@@ -1,0 +1,108 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xhubnetworks.network.platform.io
+spec:
+  group: network.platform.io
+  names:
+    kind: XHubNetwork
+    plural: xhubnetworks
+
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          description: >
+            XHubNetwork provisions the central hub network for a hub-and-spoke
+            topology. Select the cloud provider by setting compositionSelector
+            labels: provider=aws | azure | gcp.
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - parameters
+              properties:
+                parameters:
+                  type: object
+                  required:
+                    - region
+                    - cidrBlock
+                  properties:
+
+                    # ── common ──────────────────────────────────────────────
+                    region:
+                      type: string
+                      description: >
+                        Cloud region (AWS: us-east-1 | Azure: eastus | GCP: us-central1).
+
+                    cidrBlock:
+                      type: string
+                      description: CIDR block for the hub network (e.g. 10.0.0.0/16).
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+                    # ── AWS & Azure subnets ──────────────────────────────────
+                    publicSubnetCidrA:
+                      type: string
+                      description: "(AWS/Azure) CIDR for the first public subnet."
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+                    publicSubnetCidrB:
+                      type: string
+                      description: "(AWS/Azure) CIDR for the second public subnet."
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+                    privateSubnetCidrA:
+                      type: string
+                      description: "CIDR for the first private/internal subnet."
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+                    privateSubnetCidrB:
+                      type: string
+                      description: "CIDR for the second private/internal subnet."
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+                    # ── AWS-specific ─────────────────────────────────────────
+                    availabilityZoneA:
+                      type: string
+                      description: "(AWS) First availability zone (e.g. us-east-1a)."
+
+                    availabilityZoneB:
+                      type: string
+                      description: "(AWS) Second availability zone (e.g. us-east-1b)."
+
+                    transitGatewayAsn:
+                      type: integer
+                      description: "(AWS) BGP ASN for the Transit Gateway."
+                      default: 64512
+                      minimum: 64512
+                      maximum: 65534
+
+                    # ── Azure-specific ───────────────────────────────────────
+                    resourceGroupName:
+                      type: string
+                      description: "(Azure) Name of the Resource Group to create."
+
+                    # ── GCP-specific ─────────────────────────────────────────
+                    projectId:
+                      type: string
+                      description: "(GCP) GCP Project ID."
+
+            status:
+              type: object
+              properties:
+                hubNetworkId:
+                  type: string
+                  description: >
+                    Provisioned hub network ID
+                    (AWS: VPC ID | Azure: VNet resource ID | GCP: Network self-link).
+                transitGatewayId:
+                  type: string
+                  description: "(AWS) Transit Gateway ID used by spoke attachments."
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true

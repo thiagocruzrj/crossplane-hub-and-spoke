@@ -1,0 +1,24 @@
+# Prerequisites:
+#   kubectl get xhubnetwork gcp-hub -o jsonpath='{.status.hubNetworkId}'
+#   (returns the hub network self-link)
+#
+# Apply:  kubectl apply -f examples/gcp/spoke.yaml
+
+apiVersion: network.platform.io/v1alpha1
+kind: XSpokeNetwork
+metadata:
+  name: gcp-spoke-workloads
+spec:
+  compositionSelector:
+    matchLabels:
+      provider: gcp
+      topology: hub-and-spoke
+  parameters:
+    region: us-central1
+    cidrBlock: 10.201.0.0/20
+
+    projectId: my-gcp-project-id
+
+    # From: kubectl get xhubnetwork gcp-hub -o jsonpath='{.status.hubNetworkId}'
+    hubNetworkId: https://www.googleapis.com/compute/v1/projects/my-gcp-project-id/global/networks/gcp-hub-network
+    hubNetworkSelfLink: https://www.googleapis.com/compute/v1/projects/my-gcp-project-id/global/networks/gcp-hub-network

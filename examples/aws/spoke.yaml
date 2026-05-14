@@ -1,0 +1,35 @@
+# Prerequisites:
+#   Hub must be Ready and status.transitGatewayId must be populated.
+#   Retrieve values:
+#     kubectl get xhubnetwork aws-hub -o jsonpath='{.status.hubNetworkId}'
+#     kubectl get xhubnetwork aws-hub -o jsonpath='{.status.transitGatewayId}'
+#
+# Apply:  kubectl apply -f examples/aws/spoke.yaml
+
+apiVersion: network.platform.io/v1alpha1
+kind: XSpokeNetwork
+metadata:
+  name: aws-spoke-workloads
+spec:
+  compositionSelector:
+    matchLabels:
+      provider: aws
+      topology: hub-and-spoke
+  parameters:
+    region: us-east-1
+    cidrBlock: 10.1.0.0/16
+
+    availabilityZoneA: us-east-1a
+    availabilityZoneB: us-east-1b
+
+    subnetCidrA: 10.1.0.0/24
+    subnetCidrB: 10.1.1.0/24
+
+    # From: kubectl get xhubnetwork aws-hub -o jsonpath='{.status.hubNetworkId}'
+    hubNetworkId: vpc-0abc1234def56789
+
+    # From: kubectl get xhubnetwork aws-hub -o jsonpath='{.status.transitGatewayId}'
+    transitGatewayId: tgw-0abc1234def56789
+
+    # Hub VPC CIDR — used to create the return route in the spoke route table
+    hubCidrBlock: 10.0.0.0/16

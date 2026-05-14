@@ -1,0 +1,114 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xspokenetworks.network.platform.io
+spec:
+  group: network.platform.io
+  names:
+    kind: XSpokeNetwork
+    plural: xspokenetworks
+
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          description: >
+            XSpokeNetwork provisions a spoke network and connects it to the hub
+            via Transit Gateway (AWS), VNet Peering (Azure), or VPC Peering (GCP).
+            Select the cloud provider with compositionSelector labels: provider=aws | azure | gcp.
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - parameters
+              properties:
+                parameters:
+                  type: object
+                  required:
+                    - region
+                    - cidrBlock
+                    - hubNetworkId
+                  properties:
+
+                    # ── common ──────────────────────────────────────────────
+                    region:
+                      type: string
+                      description: >
+                        Cloud region (must match the hub region or a peered region).
+
+                    cidrBlock:
+                      type: string
+                      description: CIDR block for the spoke network (must not overlap with hub).
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+                    hubNetworkId:
+                      type: string
+                      description: >
+                        ID/self-link of the hub network
+                        (AWS: VPC ID | Azure: VNet resource ID | GCP: Network self-link).
+
+                    # ── AWS & Azure subnets ──────────────────────────────────
+                    subnetCidrA:
+                      type: string
+                      description: "CIDR for the first spoke subnet."
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+                    subnetCidrB:
+                      type: string
+                      description: "CIDR for the second spoke subnet (optional)."
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+                    # ── AWS-specific ─────────────────────────────────────────
+                    availabilityZoneA:
+                      type: string
+                      description: "(AWS) First availability zone."
+
+                    availabilityZoneB:
+                      type: string
+                      description: "(AWS) Second availability zone."
+
+                    transitGatewayId:
+                      type: string
+                      description: "(AWS) Transit Gateway ID from the hub HubNetwork status."
+
+                    hubCidrBlock:
+                      type: string
+                      description: "(AWS) Hub VPC CIDR — used to create return route via TGW."
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+                    # ── Azure-specific ───────────────────────────────────────
+                    resourceGroupName:
+                      type: string
+                      description: "(Azure) Name of the spoke Resource Group to create."
+
+                    hubResourceGroupName:
+                      type: string
+                      description: "(Azure) Resource Group of the hub VNet."
+
+                    hubVnetName:
+                      type: string
+                      description: "(Azure) Name of the hub VNet."
+
+                    # ── GCP-specific ─────────────────────────────────────────
+                    projectId:
+                      type: string
+                      description: "(GCP) GCP Project ID."
+
+                    hubNetworkSelfLink:
+                      type: string
+                      description: "(GCP) Self-link of the hub VPC network."
+
+            status:
+              type: object
+              properties:
+                spokeNetworkId:
+                  type: string
+                  description: ID of the provisioned spoke network.
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true

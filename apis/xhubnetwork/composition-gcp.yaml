@@ -1,0 +1,166 @@
+# GCP Hub Network Composition
+#
+# Provisions:
+#   VPC Network  (custom mode, hub)
+#   Subnetwork   (hub subnet)
+#   Cloud Router (required for Cloud NAT and optional BGP routing)
+#   Cloud NAT    (outbound internet access for private instances)
+#
+# NOTE: GCP VPC Peering is non-transitive. Spoke-to-spoke traffic
+# does NOT flow through the hub automatically. For transitive routing
+# use Network Connectivity Center (NCC) — upgrade provider-gcp to
+# include the networkconnectivity resources and replace peering below.
+
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xhubnetwork-gcp
+  labels:
+    provider: gcp
+    topology: hub-and-spoke
+spec:
+  compositeTypeRef:
+    apiVersion: network.platform.io/v1alpha1
+    kind: XHubNetwork
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: crossplane-contrib-function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # ── Hub VPC Network ───────────────────────────────────────────────────
+          - name: hub-network
+            base:
+              apiVersion: compute.gcp.upbound.io/v1beta1
+              kind: Network
+              spec:
+                forProvider:
+                  autoCreateSubnetworks: false
+                  routingMode: GLOBAL
+                  description: "Hub VPC network — hub-and-spoke topology"
+                providerConfigRef:
+                  name: gcp-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-network"
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.selfLink
+                toFieldPath: status.hubNetworkId
+                policy:
+                  fromFieldPath: Optional
+
+          # ── Hub Subnetwork ────────────────────────────────────────────────────
+          - name: hub-subnetwork
+            base:
+              apiVersion: compute.gcp.upbound.io/v1beta1
+              kind: Subnetwork
+              spec:
+                forProvider:
+                  privateIpGoogleAccess: true
+                providerConfigRef:
+                  name: gcp-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnetwork"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.cidrBlock
+                toFieldPath: spec.forProvider.ipCidrRange
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.projectId
+                toFieldPath: spec.forProvider.project
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.networkRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-network"
+
+          # ── Cloud Router ──────────────────────────────────────────────────────
+          - name: cloud-router
+            base:
+              apiVersion: compute.gcp.upbound.io/v1beta1
+              kind: Router
+              spec:
+                forProvider:
+                  description: "Hub Cloud Router"
+                providerConfigRef:
+                  name: gcp-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-router"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.projectId
+                toFieldPath: spec.forProvider.project
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.networkRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-network"
+
+          # ── Cloud NAT ─────────────────────────────────────────────────────────
+          - name: cloud-nat
+            base:
+              apiVersion: compute.gcp.upbound.io/v1beta1
+              kind: RouterNAT
+              spec:
+                forProvider:
+                  natIpAllocateOption: AUTO_ONLY
+                  sourceSubnetworkIpRangesToNat: ALL_SUBNETWORKS_ALL_IP_RANGES
+                providerConfigRef:
+                  name: gcp-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-nat"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.projectId
+                toFieldPath: spec.forProvider.project
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.routerRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-router"

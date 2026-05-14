@@ -1,0 +1,205 @@
+# Azure Spoke Network Composition
+#
+# Provisions:
+#   Spoke VNet + private subnet
+#   VirtualNetworkPeering spoke→hub  (allows spoke to reach hub)
+#   VirtualNetworkPeering hub→spoke  (allows hub to reach spoke)
+#
+# Both peerings must exist for traffic to flow — Azure peering is
+# not transitive, so spoke-to-spoke traffic must traverse a firewall
+# or NVA in the hub subnet.
+
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xspokenetwork-azure
+  labels:
+    provider: azure
+    topology: hub-and-spoke
+spec:
+  compositeTypeRef:
+    apiVersion: network.platform.io/v1alpha1
+    kind: XSpokeNetwork
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: crossplane-contrib-function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # ── Spoke Resource Group ──────────────────────────────────────────────
+          - name: spoke-resource-group
+            base:
+              apiVersion: azure.upbound.io/v1beta1
+              kind: ResourceGroup
+              spec:
+                forProvider:
+                  tags:
+                    Role: spoke
+                    Topology: hub-and-spoke
+                providerConfigRef:
+                  name: azure-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.resourceGroupName
+                toFieldPath: metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+
+          # ── Spoke Virtual Network ─────────────────────────────────────────────
+          - name: spoke-vnet
+            base:
+              apiVersion: network.azure.upbound.io/v1beta2
+              kind: VirtualNetwork
+              spec:
+                forProvider:
+                  tags:
+                    Role: spoke
+                    Topology: hub-and-spoke
+                providerConfigRef:
+                  name: azure-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vnet"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.resourceGroupName
+                toFieldPath: spec.forProvider.resourceGroupName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.cidrBlock
+                toFieldPath: spec.forProvider.addressSpace[0]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.spokeNetworkId
+                policy:
+                  fromFieldPath: Optional
+
+          # ── Spoke Private Subnet ──────────────────────────────────────────────
+          - name: spoke-subnet
+            base:
+              apiVersion: network.azure.upbound.io/v1beta2
+              kind: Subnet
+              spec:
+                forProvider:
+                  name: private
+                providerConfigRef:
+                  name: azure-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnet"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.resourceGroupName
+                toFieldPath: spec.forProvider.resourceGroupName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.subnetCidrA
+                toFieldPath: spec.forProvider.addressPrefixes[0]
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.virtualNetworkNameRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vnet"
+
+          # ── Peering: Spoke → Hub ──────────────────────────────────────────────
+          - name: peering-spoke-to-hub
+            base:
+              apiVersion: network.azure.upbound.io/v1beta2
+              kind: VirtualNetworkPeering
+              spec:
+                forProvider:
+                  allowVirtualNetworkAccess: true
+                  allowForwardedTraffic: true
+                  allowGatewayTransit: false
+                  useRemoteGateways: false
+                providerConfigRef:
+                  name: azure-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-spoke-to-hub"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.resourceGroupName
+                toFieldPath: spec.forProvider.resourceGroupName
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.virtualNetworkNameRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vnet"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.hubNetworkId
+                toFieldPath: spec.forProvider.remoteVirtualNetworkId
+
+          # ── Peering: Hub → Spoke ──────────────────────────────────────────────
+          # Requires the service principal to have Network Contributor on the hub RG.
+          - name: peering-hub-to-spoke
+            base:
+              apiVersion: network.azure.upbound.io/v1beta2
+              kind: VirtualNetworkPeering
+              spec:
+                forProvider:
+                  allowVirtualNetworkAccess: true
+                  allowForwardedTraffic: true
+                  allowGatewayTransit: true
+                  useRemoteGateways: false
+                providerConfigRef:
+                  name: azure-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-hub-to-spoke"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.hubResourceGroupName
+                toFieldPath: spec.forProvider.resourceGroupName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.hubVnetName
+                toFieldPath: spec.forProvider.virtualNetworkName
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.remoteVirtualNetworkIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vnet"

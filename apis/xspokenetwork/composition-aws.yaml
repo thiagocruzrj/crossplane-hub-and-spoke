@@ -1,0 +1,318 @@
+# AWS Spoke Network Composition
+#
+# Provisions:
+#   Spoke VPC
+#   Private subnets (x2 AZs)
+#   Route table with default route to Transit Gateway
+#   TransitGatewayVPCAttachment — connects spoke VPC to the hub TGW
+#
+# The hub's TGW defaultRouteTablePropagation=enable automatically
+# advertises this spoke's CIDR to all other attachments.
+
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xspokenetwork-aws
+  labels:
+    provider: aws
+    topology: hub-and-spoke
+spec:
+  compositeTypeRef:
+    apiVersion: network.platform.io/v1alpha1
+    kind: XSpokeNetwork
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: crossplane-contrib-function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # ── Spoke VPC ─────────────────────────────────────────────────────────
+          - name: spoke-vpc
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: VPC
+              spec:
+                forProvider:
+                  enableDnsHostnames: true
+                  enableDnsSupport: true
+                  tags:
+                    Role: spoke
+                    Topology: hub-and-spoke
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.cidrBlock
+                toFieldPath: spec.forProvider.cidrBlock
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.spokeNetworkId
+                policy:
+                  fromFieldPath: Optional
+
+          # ── Spoke Subnet A ────────────────────────────────────────────────────
+          - name: spoke-subnet-a
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  tags:
+                    Role: spoke
+                    Tier: private
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnet-a"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.availabilityZoneA
+                toFieldPath: spec.forProvider.availabilityZone
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.subnetCidrA
+                toFieldPath: spec.forProvider.cidrBlock
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Spoke Subnet B ────────────────────────────────────────────────────
+          - name: spoke-subnet-b
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  tags:
+                    Role: spoke
+                    Tier: private
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnet-b"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.availabilityZoneB
+                toFieldPath: spec.forProvider.availabilityZone
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.subnetCidrB
+                toFieldPath: spec.forProvider.cidrBlock
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Spoke Route Table ─────────────────────────────────────────────────
+          - name: spoke-route-table
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTable
+              spec:
+                forProvider:
+                  tags:
+                    Role: spoke
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-rt"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Route to Hub via Transit Gateway ──────────────────────────────────
+          - name: spoke-route-tgw
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Route
+              spec:
+                forProvider: {}
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.hubCidrBlock
+                toFieldPath: spec.forProvider.destinationCidrBlock
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.transitGatewayId
+                toFieldPath: spec.forProvider.transitGatewayId
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.routeTableIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-rt"
+
+          # ── Subnet A → Route Table Association ───────────────────────────────
+          - name: spoke-subnet-a-rta
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider: {}
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.subnetIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnet-a"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.routeTableIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-rt"
+
+          # ── Subnet B → Route Table Association ───────────────────────────────
+          - name: spoke-subnet-b-rta
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider: {}
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.subnetIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnet-b"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.routeTableIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-rt"
+
+          # ── Transit Gateway VPC Attachment ────────────────────────────────────
+          - name: tgw-attachment
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: TransitGatewayVPCAttachment
+              spec:
+                forProvider:
+                  dnsSupport: enable
+                  ipv6Support: disable
+                  tags:
+                    Role: spoke
+                    Topology: hub-and-spoke
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-tgw-attachment"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.transitGatewayId
+                toFieldPath: spec.forProvider.transitGatewayId
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.subnetIds[0]
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnet-a"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.subnetIds[1]
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnet-b"

@@ -1,0 +1,17 @@
+# Apply:  kubectl apply -f examples/gcp/hub.yaml
+# Watch:  kubectl get xhubnetwork gcp-hub -w
+
+apiVersion: network.platform.io/v1alpha1
+kind: XHubNetwork
+metadata:
+  name: gcp-hub
+spec:
+  compositionSelector:
+    matchLabels:
+      provider: gcp
+      topology: hub-and-spoke
+  parameters:
+    region: us-central1
+    cidrBlock: 10.200.0.0/20
+
+    projectId: my-gcp-project-id

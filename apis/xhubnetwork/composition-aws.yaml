@@ -1,0 +1,516 @@
+# AWS Hub Network Composition
+#
+# Provisions:
+#   VPC → Internet Gateway → Transit Gateway
+#   Public subnets (x2) + private subnets (x2)
+#   Public route table (0.0.0.0/0 → IGW)
+#   Private route table (propagated TGW routes)
+#
+# Cross-resource references use deterministic names derived from
+# the composite resource name to avoid selector ambiguity.
+
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xhubnetwork-aws
+  labels:
+    provider: aws
+    topology: hub-and-spoke
+spec:
+  compositeTypeRef:
+    apiVersion: network.platform.io/v1alpha1
+    kind: XHubNetwork
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: crossplane-contrib-function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # ── Hub VPC ──────────────────────────────────────────────────────────
+          - name: hub-vpc
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: VPC
+              spec:
+                forProvider:
+                  enableDnsHostnames: true
+                  enableDnsSupport: true
+                  tags:
+                    Role: hub
+                    Topology: hub-and-spoke
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.cidrBlock
+                toFieldPath: spec.forProvider.cidrBlock
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.hubNetworkId
+                policy:
+                  fromFieldPath: Optional
+
+          # ── Internet Gateway ─────────────────────────────────────────────────
+          - name: internet-gateway
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: InternetGateway
+              spec:
+                forProvider:
+                  tags:
+                    Role: hub
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-igw"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Public Route Table ────────────────────────────────────────────────
+          - name: public-route-table
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTable
+              spec:
+                forProvider:
+                  tags:
+                    Role: hub
+                    Tier: public
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-rt"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Default Public Route (0.0.0.0/0 → IGW) ───────────────────────────
+          - name: public-route-igw
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Route
+              spec:
+                forProvider:
+                  destinationCidrBlock: "0.0.0.0/0"
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.routeTableIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-rt"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.gatewayIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-igw"
+
+          # ── Private Route Table ───────────────────────────────────────────────
+          - name: private-route-table
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTable
+              spec:
+                forProvider:
+                  tags:
+                    Role: hub
+                    Tier: private
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-rt"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Public Subnet A ───────────────────────────────────────────────────
+          - name: public-subnet-a
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  mapPublicIpOnLaunch: true
+                  tags:
+                    Role: hub
+                    Tier: public
+                    kubernetes.io/role/elb: "1"
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-subnet-a"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.availabilityZoneA
+                toFieldPath: spec.forProvider.availabilityZone
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.publicSubnetCidrA
+                toFieldPath: spec.forProvider.cidrBlock
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Public Subnet B ───────────────────────────────────────────────────
+          - name: public-subnet-b
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  mapPublicIpOnLaunch: true
+                  tags:
+                    Role: hub
+                    Tier: public
+                    kubernetes.io/role/elb: "1"
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-subnet-b"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.availabilityZoneB
+                toFieldPath: spec.forProvider.availabilityZone
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.publicSubnetCidrB
+                toFieldPath: spec.forProvider.cidrBlock
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Private Subnet A ──────────────────────────────────────────────────
+          - name: private-subnet-a
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  tags:
+                    Role: hub
+                    Tier: private
+                    kubernetes.io/role/internal-elb: "1"
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-subnet-a"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.availabilityZoneA
+                toFieldPath: spec.forProvider.availabilityZone
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.privateSubnetCidrA
+                toFieldPath: spec.forProvider.cidrBlock
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Private Subnet B ──────────────────────────────────────────────────
+          - name: private-subnet-b
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  tags:
+                    Role: hub
+                    Tier: private
+                    kubernetes.io/role/internal-elb: "1"
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-subnet-b"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.availabilityZoneB
+                toFieldPath: spec.forProvider.availabilityZone
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.privateSubnetCidrB
+                toFieldPath: spec.forProvider.cidrBlock
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.vpcIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          # ── Public Subnet A → Route Table Association ─────────────────────────
+          - name: public-subnet-a-rta
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider: {}
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.subnetIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-subnet-a"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.routeTableIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-rt"
+
+          # ── Public Subnet B → Route Table Association ─────────────────────────
+          - name: public-subnet-b-rta
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider: {}
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.subnetIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-subnet-b"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.routeTableIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-rt"
+
+          # ── Private Subnet A → Route Table Association ────────────────────────
+          - name: private-subnet-a-rta
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider: {}
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.subnetIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-subnet-a"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.routeTableIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-rt"
+
+          # ── Private Subnet B → Route Table Association ────────────────────────
+          - name: private-subnet-b-rta
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider: {}
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.subnetIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-subnet-b"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.routeTableIdRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-rt"
+
+          # ── Transit Gateway ───────────────────────────────────────────────────
+          - name: transit-gateway
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: TransitGateway
+              spec:
+                forProvider:
+                  description: "Hub Transit Gateway — hub-and-spoke topology"
+                  autoAcceptSharedAttachments: enable
+                  defaultRouteTableAssociation: enable
+                  defaultRouteTablePropagation: enable
+                  dnsSupport: enable
+                  vpnEcmpSupport: enable
+                  tags:
+                    Role: hub
+                    Topology: hub-and-spoke
+                providerConfigRef:
+                  name: aws-provider
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-tgw"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.transitGatewayAsn
+                toFieldPath: spec.forProvider.amazonSideAsn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.transitGatewayId
+                policy:
+                  fromFieldPath: Optional

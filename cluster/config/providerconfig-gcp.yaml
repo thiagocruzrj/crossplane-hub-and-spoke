@@ -1,0 +1,23 @@
+# Create a service account key and secret:
+#   gcloud iam service-accounts keys create /tmp/gcp-creds.json \
+#     --iam-account=crossplane-sa@<PROJECT_ID>.iam.gserviceaccount.com
+#   kubectl create secret generic gcp-creds \
+#     --from-file=credentials=/tmp/gcp-creds.json \
+#     --namespace crossplane-system
+#
+# Then apply (replace <GCP_PROJECT_ID>):
+#   kubectl apply -f cluster/config/providerconfig-gcp.yaml
+
+---
+apiVersion: gcp.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: gcp-provider
+spec:
+  projectID: <GCP_PROJECT_ID>
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: gcp-creds
+      key: credentials
